@@ -168,6 +168,11 @@ function memoized_git_ref_to_info() {
 					declare gitlab_path="${git_source%.git}" # remove .git
 					url="${gitlab_path}/-/raw/${sha1}/Makefile"
 					;;
+				#hugsun镜像仓
+				"http://192.168.0.188/"* | "http://cloud.hugsun.com.cn:15001/"* )
+					declare gitlab_path="${git_source%.git}" # remove .git
+					url="${gitlab_path}/-/raw/${sha1}/Makefile"
+					;;
 
 				*)
 					exit_with_error "Unknown git source '${git_source}'"
