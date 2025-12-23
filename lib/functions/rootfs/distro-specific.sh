@@ -35,6 +35,26 @@ function install_distribution_specific() {
 		truncate --size=0 "${SDCARD}"/etc/apt/apt.conf.d/20apt-esm-hook.conf
 	fi
 
+	# Add power-management override.
+	# Suspend / hibernate / hybrid-sleep are known to be unreliable or completely
+	# non-functional on the majority of single board computers due to incomplete
+	# vendor kernels, broken device drivers, or lack of proper firmware support.
+	# To avoid random lockups, data loss, or boards failing to wake up, we disable
+	# all systemd sleep modes by default.
+	# Users who understand the risks and have hardware that supports stable sleep
+	# states can re-enable them by setting:
+	#     POWER_MANAGEMENT_FEATURES=yes
+	if [[ "${POWER_MANAGEMENT_FEATURES:-"no"}" != "yes" ]]; then
+		mkdir -p "${SDCARD}/etc/systemd/sleep.conf.d"
+		cat <<- EOF > "${SDCARD}/etc/systemd/sleep.conf.d/00-disable.conf"
+		[Sleep]
+		AllowSuspend=no
+		AllowHibernation=no
+		AllowHybridSleep=no
+		AllowSuspendThenHibernate=no
+		EOF
+	fi
+
 	# install our base-files package (this replaces the original from Debian/Ubuntu)
 	if [[ "${KEEP_ORIGINAL_OS_RELEASE:-"no"}" != "yes" ]]; then
 		install_artifact_deb_chroot "armbian-base-files" "--allow-downgrades"
@@ -78,69 +98,42 @@ function fetch_distro_keyring() {
 		buster | bullseye | bookworm | trixie | forky | sid)
 			distro="debian"
 			;;
-		focal | jammy | noble | oracular | plucky | raccoon)
+		focal | jammy | noble | oracular | plucky | questing | resolute )
 			distro="ubuntu"
 			;;
 		*)
 			exit_with_error "fetch_distro_keyring failed" "unrecognized release: $release"
 	esac
 
-	declare -a PROXY
-	case "${MANAGE_ACNG}" in
-		yes)
-			PROXY+=('-x' 'http://localhost:3142/')
-			;;
-		no)		;&  #fallthrough
-		"")
-			PROXY+=('') # don't use a proxy
-			;;          # stop falling
-		*)
-			PROXY+=('-x' "${MANAGE_ACNG}")
-			;;
-	esac
-
 	CACHEDIR="/armbian/cache/keyrings/$distro"
 	mkdir -p "${CACHEDIR}"
 	case $distro in
+		#FIXME: there may be a point where we need an *older* keyring pkg
+		# NOTE: this will be most likely an unsupported case like a user wanting to build using an ancient debian/ubuntu release
 		debian)
 			if [ -e "${CACHEDIR}/debian-archive-keyring.gpg" ]; then
 				display_alert "fetch_distro_keyring($release)" "cache found, skipping" "info"
 			else
-			# FIXME: should this be a loop? might allow more parameterization and shorter lines to read.
-				PKG_URL=$(curl --compressed -Ls 'https://packages.debian.org/sid/all/debian-archive-keyring/download' | \
-					grep -oP 'http://(deb|ftp)\.debian\.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_[0-9.]*_[a-zA-Z0-9]*\.deb')
-				[[ -z "${PKG_URL}" ]] && exit_with_error "fetch_distro_keyring failed" "unable to find newest debian-archive-keyring package"
-				run_host_command_logged curl "${PROXY[@]}" -fLOJ --output-dir "${CACHEDIR}" "${PKG_URL}" || \
-					exit_with_error "fetch_distro_keyring failed" "unable to download ${PKG_URL}"
-				KEYRING_DEB=$(basename "${PKG_URL}")
-				dpkg-deb -x "${CACHEDIR}/${KEYRING_DEB}" "${CACHEDIR}" || \
-					exit_with_error "fetch_distro_keyring" "dpkg-deb -x ${CACHEDIR}/${KEYRING_DEB} failed"
-				if [[ -e "${CACHEDIR}/usr/share/keyrings/debian-archive-keyring.pgp" ]]; then
-					# yes, for 2025.1, the canonical name is .pgp, but our tools expect .gpg.
-					# the package contains the .pgp and a .gpg symlink to it.
-					cp -l "${CACHEDIR}/usr/share/keyrings/debian-archive-keyring.pgp" "${CACHEDIR}/debian-archive-keyring.gpg"
-				elif [[ -e "${CACHEDIR}/usr/share/keyrings/debian-archive-keyring.gpg" ]]; then
-					cp -l "${CACHEDIR}/usr/share/keyrings/debian-archive-keyring.gpg" "${CACHEDIR}/debian-archive-keyring.gpg"
-				else
-					exit_with_error "fetch_distro_keyring" "unable to find debian-archive-keyring.gpg"
-				fi
-
-				PKG_URL=$(curl --compressed -Ls 'https://packages.debian.org/sid/all/debian-ports-archive-keyring/download' | \
-					grep -oP 'http://(deb|ftp)\.debian\.org/debian/pool/main/d/debian-ports-archive-keyring/debian-ports-archive-keyring_[0-9.]*_[a-zA-Z0-9]*\.deb')
-				[[ -z "${PKG_URL}" ]] && exit_with_error "fetch_distro_keyring failed" "unable to find newest debian-ports-archive-keyring package"
-				run_host_command_logged curl "${PROXY[@]}" -fLOJ --output-dir "${CACHEDIR}" "${PKG_URL}" || \
-					exit_with_error "fetch_distro_keyring failed" "unable to download ${PKG_URL}"
-				KEYRING_DEB=$(basename "${PKG_URL}")
-				dpkg-deb -x "${CACHEDIR}/${KEYRING_DEB}" "${CACHEDIR}" || \
-					exit_with_error "fetch_distro_keyring" "dpkg-deb -x ${CACHEDIR}/${KEYRING_DEB} failed"
-				if [[ -e "${CACHEDIR}/usr/share/keyrings/debian-ports-archive-keyring.pgp" ]]; then
-					# see above comment re .pgp vs .gpg
-					cp -l "${CACHEDIR}/usr/share/keyrings/debian-ports-archive-keyring.pgp" "${CACHEDIR}/debian-ports-archive-keyring.gpg"
-				elif [[ -e "${CACHEDIR}/usr/share/keyrings/debian-ports-archive-keyring.gpg" ]]; then
-					cp -l "${CACHEDIR}/usr/share/keyrings/debian-ports-archive-keyring.gpg" "${CACHEDIR}/debian-ports-archive-keyring.gpg"
-				else
-					exit_with_error "fetch_distro_keyring" "unable to find debian-ports-archive-keyring.gpg"
-				fi
+			# for details of how this gets into this mirror, see
+			# github.com/armbian/armbian.github.io/ .github/workflows/generate-keyring-data.yaml
+				for p in debian-archive-keyring debian-ports-archive-keyring; do
+					# if we use http://, we'll get a 301 to https://, but this means we can't use a caching proxy like ACNG
+					PKG_URL="https://github.armbian.com/keyrings/latest-${p}.deb"
+					run_host_command_logged curl -fLOJ --output-dir "${CACHEDIR}" "${PKG_URL}" || \
+						exit_with_error "fetch_distro_keyring failed" "unable to download ${PKG_URL}"
+					KEYRING_DEB=$(basename "${PKG_URL}")
+					# We ignore errors from dpkg-deb/tar b/c we cannot tell the difference between unpack failures and chmod/chgrp failures
+					dpkg-deb -x "${CACHEDIR}/${KEYRING_DEB}" "${CACHEDIR}" || /bin/true # ignore failures, we'll check a few lines down
+					if [[ -e "${CACHEDIR}/usr/share/keyrings/${p}.pgp" ]]; then
+						# yes, the canonical name is .pgp, but our tools expect .gpg.
+						# the package contains the .pgp and a .gpg symlink to it.
+						cp -l "${CACHEDIR}/usr/share/keyrings/${p}.pgp" "${CACHEDIR}/${p}.gpg"
+					elif [[ -e "${CACHEDIR}/usr/share/keyrings/${p}.gpg" ]]; then
+						cp -l "${CACHEDIR}/usr/share/keyrings/${p}.gpg" "${CACHEDIR}/${p}.gpg"
+					else
+						exit_with_error "fetch_distro_keyring" "unable to find ${p}.gpg"
+					fi
+				done
 				display_alert "fetch_distro_keyring($release)" "extracted" "info"
 			fi
 			;;
@@ -148,22 +141,21 @@ function fetch_distro_keyring() {
 			if [ -e "${CACHEDIR}/ubuntu-archive-keyring.gpg" ]; then
 				display_alert "fetch_distro_keyring($release)" "cache found, skipping" "info"
 			else
-				NEWEST_SUITE=$(curl --compressed -Ls https://changelogs.ubuntu.com/meta-release | grep 'Dist:'|tail -n 1 | awk '{print $NF}')
-				PKG_URL=$(curl --compressed -Ls "https://packages.ubuntu.com/${NEWEST_SUITE}/all/ubuntu-keyring/download" | \
-					grep -oP 'http://\S+\.deb' |grep archive.ubuntu.com|tail -n 1)
-				[[ -z "${PKG_URL}" ]] && exit_with_error "fetch_distro_keyring failed" "unable to find newest ubuntu-keyring package"
-				# ubuntu gives a long list of regional mirrors, we want as generic as possible
-				PKG_URL=$(echo "${PKG_URL}" | sed -E 's/[a-z0-9]+\.archive/archive/')
-				run_host_command_logged curl "${PROXY[@]}" -fLOJ --output-dir "${CACHEDIR}" "${PKG_URL}" || \
+				PKG_URL="https://github.armbian.com/keyrings/latest-ubuntu-keyring.deb"
+				run_host_command_logged curl -fLOJ --output-dir "${CACHEDIR}" "${PKG_URL}" || \
 					exit_with_error "fetch_distro_keyring failed" "unable to download ${PKG_URL}"
 				KEYRING_DEB=$(basename "${PKG_URL}")
-				dpkg-deb -x "${CACHEDIR}/${KEYRING_DEB}" "${CACHEDIR}" || \
-					exit_with_error "fetch_distro_keyring" "dpkg-deb -x ${CACHEDIR}/${KEYRING_DEB} failed"
+				dpkg-deb -x "${CACHEDIR}/${KEYRING_DEB}" "${CACHEDIR}" || /bin/true # see above in debian block about ignoring errors
+				if [[ ! -e "${CACHEDIR}/usr/share/keyrings/ubuntu-archive-keyring.gpg" ]]; then
+					exit_with_error "fetch_distro_keyring" "unable to find ubuntu-archive-keyring.gpg"
+				fi
 				cp -l "${CACHEDIR}/usr/share/keyrings/ubuntu-archive-keyring.gpg" "${CACHEDIR}/"
 				display_alert "fetch_distro_keyring($release)" "extracted" "info"
 			fi
 			debootstrap_arguments+=("--keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg")
 			;;
+		*)
+			exit_with_error "fetch_distro_keyring" "unrecognized distro: $distro"
 	esac
 	# cp -l may break here if it's cross-filesystem
 	# copy everything to the "host" inside the container
@@ -174,7 +166,7 @@ function fetch_distro_keyring() {
 # create_sources_list_and_deploy_repo_key <when> <release> <basedir>
 #
 # <when>: rootfs|image
-# <release>: bullseye|bookworm|trixie|forky|sid|focal|jammy|noble|oracular|plucky
+# <release>: bullseye|bookworm|trixie|forky|sid|focal|jammy|noble|oracular|plucky|questing|resolute
 # <basedir>: path to root directory
 #
 function create_sources_list_and_deploy_repo_key() {
@@ -256,7 +248,7 @@ function create_sources_list_and_deploy_repo_key() {
 			fi
 			;;
 
-		focal | jammy | noble | oracular | plucky)
+		focal | jammy | noble | oracular | plucky | questing | resolute)
 			distro="ubuntu"
 
 			cat <<- EOF > "${basedir}/etc/apt/sources.list.d/${distro}.sources"
