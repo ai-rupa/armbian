@@ -35,11 +35,14 @@ GOVERNOR=${GOVERNOR:-ondemand}
 
 case $BRANCH in
 
-	current)
+	oldlts)
 		declare -g KERNEL_MAJOR_MINOR="6.12"
 		;;
-	edge)
+	current)
 		declare -g KERNEL_MAJOR_MINOR="6.18"
+		;;
+	edge)
+		declare -g KERNEL_MAJOR_MINOR="6.19"
 		;;
 
 esac
