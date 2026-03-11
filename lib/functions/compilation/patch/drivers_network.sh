@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: GPL-2.0
 #
-# Copyright (c) 2013-2024 Igor Pecovnik, igor@armbian.com
+# Copyright (c) 2013-2026 Igor Pecovnik, igor@armbian.com
 #
 # This file is a part of the Armbian Build Framework
 # https://github.com/armbian/build/
@@ -228,6 +228,53 @@ driver_rtl8811_rtl8812_rtl8814_rtl8821() {
 		process_patch_file "${SRC}/patch/misc/wireless-rtl8812au-Fix-6.16.patch" "applying"
 	fi
 }
+
+driver_rtl8812EU_rtl8822EU() {
+
+	# Wireless drivers for Realtek 8812EU and 8822EU chipsets
+	# disabled from 6.19 and on.
+	if linux-version compare "${version}" ge 3.14 && linux-version compare "${version}" lt 6.19; then
+
+		# Attach to specific commit (is branch:v5.15.0.1)
+		local rtl8822euver="commit:ccb31f4ee346d5c2dd45475d276171b2f8de8350" # Commit date: 2026-02-17 (please update when updating commit ref)
+
+		display_alert "Adding" "Wireless drivers for Realtek 8812EU and 8822EU chipsets ${rtl8822euver}" "info"
+
+		fetch_from_repo "$GITHUB_SOURCE/libc0607/rtl88x2eu-20230815" "rtl8822eu" "${rtl8822euver}" "yes" # https://github.com/libc0607/rtl88x2eu-20230815
+		cd "$kerneldir" || exit
+
+		mkdir -p "$kerneldir/drivers/net/wireless/rtl8822eu/"
+		cp -R "${SRC}/cache/sources/rtl8822eu/${rtl8822euver#*:}"/{core,hal,include,os_dep,platform,rtl8822e.mk,halmac.mk} \
+			"$kerneldir/drivers/net/wireless/rtl8822eu"
+
+		# Makefile
+		cp "${SRC}/cache/sources/rtl8822eu/${rtl8822euver#*:}/Makefile" \
+			"$kerneldir/drivers/net/wireless/rtl8822eu/Makefile"
+
+		# Kconfig
+		cp "${SRC}/cache/sources/rtl8822eu/${rtl8822euver#*:}/Kconfig" \
+			"$kerneldir/drivers/net/wireless/rtl8822eu/Kconfig"
+
+		# Enable AP mode
+		sed -i "s/^CONFIG_AP_MODE.*/CONFIG_AP_MODE = y/" \
+			"$kerneldir/drivers/net/wireless/rtl8822eu/Makefile"
+
+		# Enable P2P mode
+		sed -i "s/^CONFIG_P2P.*/CONFIG_P2P = y/" \
+			"$kerneldir/drivers/net/wireless/rtl8822eu/Makefile"
+
+		# Fix Kconfig file
+		sed -i 's/^\([[:space:]]*\)---help---/\1help/' \
+			"$kerneldir/drivers/net/wireless/rtl8822eu/Kconfig"
+
+
+		# Add to section Makefile
+		echo "obj-\$(CONFIG_RTL8822EU) += rtl8822eu/" >> "$kerneldir/drivers/net/wireless/Makefile"
+		sed -i '/source "drivers\/net\/wireless\/ti\/Kconfig"/a source "drivers\/net\/wireless\/rtl8822eu\/Kconfig"' \
+			"$kerneldir/drivers/net/wireless/Kconfig"
+	fi
+}
+
 
 driver_xradio_xr819() {
 
@@ -571,6 +618,10 @@ driver_uwe5622() {
                         process_patch_file "${SRC}/patch/misc/wireless-uwe5622/uwe5622-v6.18.patch" "applying"
         fi
 
+		if linux-version compare "${version}" ge 6.19; then
+			process_patch_file "${SRC}/patch/misc/wireless-uwe5622/uwe5622-v6.19.patch" "applying"
+		fi
+
 	fi
 }
 
@@ -582,6 +633,30 @@ driver_rtl8723cs() {
 
 	# It was disabled from d1/bcm2711 as that kernel is not fully in sync with mainline and as its probably not needed there anyway
 	if [[ "$LINUXFAMILY" == bcm2711 || "$LINUXFAMILY" == d1 ]]; then
+		return 0
+	fi
+
+	# -- BLUETOOTH --
+	# these few patches address some issues to let the rtl8723cs/rtl8703b chipsets to be used within the serdev framework
+	# Available only with kernels >= 6.1, because bt driver does not exist in older kernels
+	if linux-version compare "${version}" ge 6.1; then
+
+		if linux-version compare "${version}" ge 6.2 && linux-version compare "${version}" lt 6.3; then # landed in 6.1.30/6.3.4 # keep for 6.2
+			process_patch_file "${SRC}/patch/misc/bluetooth-rtl8723cs/bluetooth-btrtl-quirk-local-ext-features.patch" "applying"
+			process_patch_file "${SRC}/patch/misc/bluetooth-rtl8723cs/Bluetooth-btrtl-add-support-for-the-RTL8723CS.patch" "applying"
+		fi
+
+		process_patch_file "${SRC}/patch/misc/bluetooth-rtl8723cs/Bluetooth-hci_h5-Add-support-for-binding-RTL8723CS-with-device-.patch" "applying"
+		process_patch_file "${SRC}/patch/misc/bluetooth-rtl8723cs/bluetooth-h5-Don-t-re-initialize-rtl8723cs-on-resume.patch" "applying"
+		process_patch_file "${SRC}/patch/misc/bluetooth-rtl8723cs/bluetooth-btrtl-add-rtl8703bs.patch" "applying"
+		process_patch_file "${SRC}/patch/misc/bluetooth-rtl8723cs/dt-bindings-net-bluetooth-Add-rtl8723bs-bluetooth.patch" "applying"
+
+	fi
+
+	# -- WIFI --
+	# Wireless patches; do note kernels >= 6.19 do not need this because it has been superseded by mainline rtw88 driver.
+	# If we're >= 6.19, we stop here
+	if linux-version compare "${version}" ge 6.19; then
 		return 0
 	fi
 
@@ -619,17 +694,8 @@ driver_rtl8723cs() {
 		process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/8723cs-Port-to-6.0.patch" "applying"
 		process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/8723cs-Port-to-6.1.patch" "applying"
 		process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/8723cs-Port-to-6.1-rc1.patch" "applying"
-		process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/dt-bindings-net-bluetooth-Add-rtl8723bs-bluetooth.patch" "applying"
-
-		if linux-version compare "${version}" ge 6.2 && linux-version compare "${version}" lt 6.3; then # landed in 6.1.30/6.3.4 # keep for 6.2
-			process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/bluetooth-btrtl-quirk-local-ext-features.patch" "applying"
-			process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/Bluetooth-btrtl-add-support-for-the-RTL8723CS.patch" "applying"
-		fi
-
-		process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/Bluetooth-hci_h5-Add-support-for-binding-RTL8723CS-with-device-.patch" "applying"
-		process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/bluetooth-h5-Don-t-re-initialize-rtl8723cs-on-resume.patch" "applying"
-		process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/bluetooth-btrtl-add-rtl8703bs.patch" "applying"
 		process_patch_file "${SRC}/patch/misc/wireless-rtl8723cs/8723cs-Fix-symbol-conflicts-with-rtw88-driver.patch" "applying"
+
 	fi
 
 	if linux-version compare "${version}" ge 6.3; then
