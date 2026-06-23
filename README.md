@@ -1,7 +1,16 @@
-<h3 align="center">
-  <a href=#><img src="https://raw.githubusercontent.com/armbian/.github/master/profile/logosmall.png" alt="Armbian logo"></a>
-  <br><br>
-</h3>
+# DEPRECATED:
+# This branch will not receive any further updates or fixes. Do NOT open bug reports when using it.
+
+<p align="center">
+  <a href="#build-framework">
+  <img src=".github/armbian-logo.png" alt="Armbian logo" width="144">
+  </a><br>
+  <strong>Armbian Linux Build Framework</strong><br>
+<br>
+<a href=https://github.com/armbian/build/actions/workflows/build-train.yml><img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/armbian/build/build-train.yml?logo=githubactions&label=Kernel%20compile&logoColor=white&style=for-the-badge&branch=master"></a>
+<a href=https://github.com/armbian/build/actions/workflows/build-all-desktops.yml><img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/armbian/build/build-all-desktops.yml?logo=githubactions&logoColor=white&label=Images%20assembly&style=for-the-badge&branch=master"></a>
+<a href=https://github.com/armbian/build/actions/workflows/smoke-tests.yml><img alt="Smoke test success ratio" src="https://img.shields.io/badge/dynamic/json?logo=speedtest&label=Smoke%20tests%20success&query=SMOKE&color=44cc11&cacheSeconds=600&style=for-the-badge&url=https%3A%2F%2Fgithub.com%2Farmbian%2Fscripts%2Freleases%2Fdownload%2Fstatus%2Frunners_capacity.json"></a>
+ <br>
 
 ## Purpose of This Repository
 
