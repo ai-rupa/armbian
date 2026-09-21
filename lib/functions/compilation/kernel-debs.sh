@@ -28,13 +28,13 @@
 # - building the .debs.
 
 is_enabled() {
-	grep -q "^$1=y" include/config/auto.conf
+	grep -q "^$1=y" "${kernel_work_dir}/include/config/auto.conf"
 }
 
 if_enabled_echo() {
 	if is_enabled "$1"; then
 		echo -n "$2"
-	elif [ $# -ge 3 ]; then
+	elif [[ $# -ge 3 ]]; then
 		echo -n "$3"
 	fi
 }
@@ -204,10 +204,42 @@ function kernel_package_callback_linux_image() {
 	declare kernel_pre_package_path="${tmp_kernel_install_dirs[INSTALL_PATH]}"
 	kernel_image_installed_file_name=$(basename $(ls ${kernel_pre_package_path}/vmlinu*-${kernel_version_family}))
 	kernel_image_name=${kernel_image_installed_file_name%%-*}
+
+	# installkernel(8) (/sbin/installkernel) and arch/arm64/boot/install.sh name an *uncompressed* arm64
+	# 'Image' as vmlinux-<ver> -- only Image.gz / vmlinuz.efi become vmlinuz-<ver>. That file is a perfectly
+	# bootable Image, but every Armbian consumer and boot script (image-output-abl/-iso, extlinux/boot.cmd,
+	# the vfat-cleanup hook below) expects vmlinuz-<ver>. Normalize the name back to vmlinuz -- unless this
+	# arch genuinely boots a raw vmlinux (KERNEL_IMAGE_TYPE=vmlinux, e.g. loong64), where the name is correct.
+	if [[ "${kernel_image_name}" == "vmlinux" && "${KERNEL_IMAGE_TYPE}" != "vmlinux" ]]; then
+		display_alert "Normalizing misnamed kernel image" "${kernel_image_installed_file_name} -> vmlinuz-${kernel_version_family}" "info"
+		run_host_command_logged mv "${kernel_pre_package_path}/${kernel_image_installed_file_name}" "${kernel_pre_package_path}/vmlinuz-${kernel_version_family}"
+		kernel_image_installed_file_name="vmlinuz-${kernel_version_family}"
+		kernel_image_name="vmlinuz"
+	fi
 	display_alert "linux-image deb packaging kernel_image_name" "${kernel_image_name}" "info"
 	declare kernel_image_pre_package_path="${kernel_pre_package_path}/${kernel_image_name}-${kernel_version_family}"
 	declare installed_image_path="boot/${kernel_image_name}-${kernel_version_family}" # using old mkdebian terminology here for compatibility
 
+	if [[ "${KERNEL_DO_STUBBLE}" == "yes" ]]; then
+		# Use built stubble paths, fallback to system if not available
+		local stubble_find_dtbs="${STUBBLE_FIND_DTBS:-/usr/libexec/stubble/finddtbs.py}"
+		local stubble_efi="${STUBBLE_EFI_PATH:-/usr/lib/stubble/stubble.efi}"
+		local stubble_hwids="${STUBBLE_HWIDS_DIR:-/usr/share/stubble/hwids}"
+		local stubble_sbat="${STUBBLE_SBAT_PATH:-/usr/share/stubble/sbat}"
+
+		# Run finddtbs and validate output
+		stubble_dtbs_raw=$("${stubble_find_dtbs}" "${tmp_kernel_install_dirs[INSTALL_DTBS_PATH]}" "${stubble_hwids}")
+		if [[ $? -ne 0 ]]; then
+			exit_with_error "finddtbs.py failed" "${stubble_find_dtbs}"
+		fi
+		stubble_dtbs=$(echo "${stubble_dtbs_raw}" | sed 's|.*|--devicetree-auto=&|' | tr '\n' ' ')
+		# EXTRA_STUBBLE_DEVICETREES: family-supplied DTBs not yet in stubble hwids (see uefidt.conf).
+		for extra_dtb in "${EXTRA_STUBBLE_DEVICETREES[@]}"; do
+			stubble_dtbs+=" --devicetree-auto=${tmp_kernel_install_dirs[INSTALL_DTBS_PATH]}/${extra_dtb}"
+		done
+		run_host_command_logged /usr/bin/ukify build --linux="${kernel_image_pre_package_path}" --stub="${stubble_efi}" --hwids="${stubble_hwids}" --sbat="@${stubble_sbat}" ${stubble_dtbs} --output="${kernel_pre_package_path}/${kernel_image_name}-${kernel_version_family}.efi"
+		run_host_command_logged mv "${kernel_pre_package_path}/${kernel_image_name}-${kernel_version_family}.efi" "${kernel_pre_package_path}/${kernel_image_name}-${kernel_version_family}"
+	fi
 	display_alert "Showing contents of Kbuild produced /boot" "linux-image" "debug"
 	run_host_command_logged tree -C --du -h "${tmp_kernel_install_dirs[INSTALL_PATH]}"
 
@@ -265,6 +297,7 @@ function kernel_package_callback_linux_image() {
 		Maintainer: ${MAINTAINER} <${MAINTAINERMAIL}>
 		Section: kernel
 		Priority: optional
+		Depends: initramfs-tools | linux-initramfs-tool
 		Provides: linux-image, linux-image-armbian, armbian-$BRANCH, wireguard-modules
 		Description: Armbian Linux $BRANCH kernel image $kernel_version_family
 		 This package contains the Linux kernel, modules and corresponding other files.
@@ -510,6 +543,9 @@ function kernel_package_callback_linux_headers() {
 
 	# Generate a control file
 	# TODO: libssl-dev is only required if we're signing modules, which is a kernel .config option.
+	# Note: 'pahole | dwarves' alternative — older releases (buster/bullseye/focal) ship pahole inside the
+	# 'dwarves' package; standalone 'pahole' exists from bookworm/jammy onward. When support for these
+	# releases is dropped, simplify to 'pahole'.
 	cat <<- CONTROL_FILE > "${package_DEBIAN_dir}/control"
 		Version: ${artifact_version}
 		Maintainer: ${MAINTAINER} <${MAINTAINERMAIL}>
@@ -517,8 +553,8 @@ function kernel_package_callback_linux_headers() {
 		Package: ${package_name}
 		Architecture: ${ARCH}
 		Priority: optional
-		Provides: linux-headers, linux-headers-armbian, armbian-$BRANCH
-		Depends: make, gcc, libc6-dev, bison, flex, libssl-dev, libelf-dev, pahole
+		Provides: linux-headers (= ${kernel_version}), linux-headers-armbian, armbian-$BRANCH
+		Depends: make, gcc, libc6-dev, bison, flex, libssl-dev, libelf-dev, pahole | dwarves
 		Description: Armbian Linux $BRANCH headers ${kernel_version_family}
 		 This package provides kernel header files for ${kernel_version_family}
 		 .
