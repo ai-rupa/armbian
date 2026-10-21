@@ -1,77 +1,104 @@
-<h3 align="center">
-  <a href=#><img src="https://raw.githubusercontent.com/armbian/.github/master/profile/logosmall.png" alt="Armbian logo"></a>
-  <br><br>
-</h3>
+# Blueberry Boards
 
-## Purpose of This Repository
+**English** | [简体中文](README.zh-CN.md)
 
-The **Armbian Linux Build Framework** creates customizable OS images based on **Debian** or **Ubuntu** for **single-board computers (SBCs)** and embedded devices.
+Open-source development boards under the **Rupa** brand, built on the [Armbian Build Framework](https://github.com/armbian/build). This repository adds Blueberry board definitions and device-tree bindings on top of Armbian to produce ready-to-flash Ubuntu images.
 
-It builds a complete Linux system including kernel, bootloader, and root filesystem, giving you control over versions, configuration, firmware, device trees, and system optimizations.
+---
 
-The framework supports **native**, **cross**, and **containerized** builds for multiple architectures (`x86_64`, `aarch64`, `armhf`, `riscv64`) and is suitable for development, testing, production, or automation.
+## 1. Supported Boards
 
-> **Looking for prebuilt images?** Use [Armbian Imager](https://github.com/armbian/imager/releases) — the easiest way to download and flash Armbian to your SD card or USB drive. Available for Linux, macOS, and Windows.
+| `BOARD=` | Model | SoC | Key interfaces |
+|---|---|---|---|
+| `blueberry-rk3588-edge` | Blueberry Edge | RK3588 | Dual GbE, HDMI out + HDMI in, SATA, M.2 NVMe, RS485/RS232, 4G |
+| `blueberry-rk3588-minipc` | Blueberry MiniPC | RK3588 | Single GbE, dual HDMI out, M.2, SATA |
+| `blueberry-rk3576-edge` | Blueberry RK3576 Edge | RK3576 | Dual GbE, HDMI + DP out, HDMI in, MIPI display, RS485, 4G |
+| `blueberry-rk3568-edge` | Blueberry Edge (RK3568) | RK3568 | Planned — not buildable yet |
 
-## Quick Start
+The three buildable boards all use the `vendor` kernel branch (Rockchip BSP 6.1). The serial console is `ttyS2 @ 1500000 8N1`.
+
+---
+
+## 2. Building Images
+
+### Requirements
+
+- Linux (Ubuntu 22.04 / 24.04 recommended), or macOS / Windows with Docker Desktop
+- Docker 20.10+ (must support `--privileged`)
+- At least 50 GB of disk space and 8 GB of RAM
+
+### Get the source
 
 ```bash
-git clone https://github.com/armbian/build
-cd build
-./compile.sh
+git clone https://github.com/ai-rupa/armbian.git
+cd armbian
+git checkout rupa_armbian_v26.08
 ```
 
-<a href="#how-to-build-an-image-or-a-kernel"><img src=".github/README.gif" alt="Build demonstration" width="100%"></a>
+### Build
 
-## Build Host Requirements
+Server image (no desktop):
 
-### Hardware
-- **RAM:** ≥8GB (less with `KERNEL_BTF=no`)
-- **Disk:** ~50GB free space
-- **Architecture:** x86_64, aarch64, or riscv64
+```bash
+./compile.sh build \
+  BOARD=blueberry-rk3576-edge \
+  BRANCH=vendor \
+  BUILD_DESKTOP=no \
+  BUILD_MINIMAL=no \
+  KERNEL_CONFIGURE=no \
+  RELEASE=noble
+```
 
-### Operating System
-- **Native builds:** Armbian or Ubuntu 24.04 (Noble)
-- **Containerized:** Any Docker-capable Linux
-- **Windows:** WSL2 with Armbian/Ubuntu 24.04
+Desktop image (XFCE):
 
-### Software
-- Superuser privileges (`sudo` or root)
-- Up-to-date system (outdated Docker or other tools can cause failures)
+```bash
+./compile.sh build \
+  BOARD=blueberry-rk3576-edge \
+  BRANCH=vendor \
+  BUILD_DESKTOP=yes \
+  BUILD_MINIMAL=no \
+  DESKTOP_ENVIRONMENT=xfce \
+  DESKTOP_TIER=minimal \
+  KERNEL_CONFIGURE=no \
+  RELEASE=noble
+```
 
-## Resources
+Kernel or U-Boot only:
 
-- **[Documentation](https://docs.armbian.com/Developer-Guide_Overview/)** — Comprehensive guides for building, configuring, and customizing
-- **[Website](https://www.armbian.com)** — News, features, and board information
-- **[Blog](https://blog.armbian.com)** — Development updates and technical articles
-- **[Forums](https://forum.armbian.com)** — Community support and discussions
+```bash
+./compile.sh kernel BOARD=blueberry-rk3588-edge BRANCH=vendor KERNEL_CONFIGURE=yes
+./compile.sh uboot BOARD=blueberry-rk3588-edge BRANCH=vendor
+```
 
-## Contributing
+### Output
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting issues, submitting changes, and contributing code.
+```
+output/images/
+├── Armbian-unofficial_26.08.0-trunk_Blueberry-rk3576-edge_noble_vendor_6.1.115_xfce_desktop.img
+├── ...img.sha    # SHA256
+└── ...img.txt    # image content summary
+```
 
-## Support
+Verify the checksum, then flash:
 
-### Community Forums
-Get help from users and contributors on troubleshooting, configuration, and development.
-👉 [forum.armbian.com](https://forum.armbian.com)
+```bash
+cd output/images && shasum -a 256 -c *.img.sha
+```
 
-### Real-time Chat
-Join discussions with developers and community members on IRC or Discord.
-👉 [Community Chat](https://docs.armbian.com/Community_IRC/)
+Booting from microSD / eMMC / NVMe / SPI NOR is supported. Flash with `dd`, UMS mode, or `rkdeveloptool` depending on the board — or add `ENABLE_EXTENSIONS=rkdevflash` to flash automatically once the build finishes.
 
-### Paid Consultation
-For commercial projects, guaranteed response times, or advanced needs, paid support is available from Armbian maintainers.
-👉 [Contact us](https://www.armbian.com/contact)
+---
 
-## Contributors
+## 3. Notes
 
-Thank you to everyone who has contributed to Armbian!
+- **Kernel and U-Boot source URLs** live in `config/sources/families/*.conf` and in each board's `.conf`. If you use your own mirror, change only those entries; no other logic needs touching.
+- **Put local customizations in `userpatches/`**: `config-custom.conf` holds your usual parameter combinations, while `customize-image.sh` and `overlay/` preset users, packages, and boot scripts. Changes there are never pushed upstream.
+- **Do not modify `lib/`**: it is the Armbian framework core, and any change there has to be reapplied on every upstream sync.
 
-<a href="https://github.com/armbian/build/graphs/contributors">
-  <img alt="Contributors" src="https://contrib.rocks/image?repo=armbian/build" />
-</a>
+---
 
-## Armbian Partners
+## License
 
-Our [partnership program](https://forum.armbian.com/subscriptions) supports Armbian's development and community. Learn more about [our Partners](https://armbian.com/partners).
+This repository is licensed under **GPL-2.0**; see [LICENSE](LICENSE). It is built on the Armbian Build Framework and is not an official Armbian project, so images are named `Armbian-unofficial_*`.
+
+Upstream Armbian documentation is preserved in [README.armbian.md](README.armbian.md).
