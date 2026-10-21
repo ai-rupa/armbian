@@ -1,5 +1,11 @@
 {
     "[*.inc]": {
         "editor.defaultFormatter": "foxundermoon.shell-format"
+    },
+    "files.exclude": {
+        "**/.github": true,
+        "**/.tmp": true,
+        "**/.vscode": true,
+        "**/.workbuddy": true
     }
 }
